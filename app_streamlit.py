@@ -10,7 +10,6 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import pandas as pd
 import time
-from sklearn.ensemble import RandomForestRegressor
 
 # --- 1. APP CONFIGURATION ---
 st.set_page_config(
@@ -51,23 +50,59 @@ def load_diagnosis_model(model_path):
         return None
 
 @st.cache_resource
-def train_forecasting_model(file_path):
+def load_dataset(file_path):
     try:
         df = pd.read_csv(file_path)
-        df = df.drop('filename', axis=1)
-        categorical_features = ['class_name', 'location', 'soil_status', 'weather']
-        df_encoded = pd.get_dummies(df, columns=categorical_features, drop_first=True)
-        X = df_encoded.drop('predicted_outbreaks_next_day', axis=1)
-        y = df_encoded['predicted_outbreaks_next_day']
-        model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-        model.fit(X, y)
-        return model, X.columns
+        return df
     except FileNotFoundError:
         st.error(f"Error: The file '{file_path}' was not found. Please ensure 'final_combined_dataset.csv' is uploaded.")
-        return None, None
+        return None
     except Exception as e:
-        st.error(f"Error training forecasting model: {e}")
-        return None, None
+        st.error(f"Error loading dataset: {e}")
+        return None
+
+def manual_forecast_outbreak(df, input_data):
+    """
+    Manually forecasts outbreaks by averaging historical data for similar conditions.
+    Args:
+        df (pd.DataFrame): The dataset with historical outbreak data.
+        input_data (dict): Input data with class_name, location, latitude, longitude, temperature, humidity, soil_status, weather.
+    Returns:
+        float: Predicted number of outbreaks, or None if no data matches.
+    """
+    try:
+        # Define matching conditions
+        disease = input_data['class_name']
+        location = input_data['location'].strip()
+        temp = input_data['temperature']
+        hum = input_data['humidity']
+        soil = input_data['soil_status']
+        weather = input_data['weather']
+
+        # Filter dataset for similar conditions
+        mask = (
+            (df['class_name'] == disease) &
+            (df['location'] == location) &
+            (df['temperature'].between(temp - 2, temp + 2)) &
+            (df['humidity'].between(hum - 5, hum + 5)) &
+            (df['soil_status'] == soil) &
+            (df['weather'] == weather)
+        )
+        matching_data = df[mask]
+
+        if matching_data.empty:
+            # Fallback: Average outbreaks for the disease across all conditions
+            fallback_data = df[df['class_name'] == disease]
+            if fallback_data.empty:
+                # Ultimate fallback: Dataset mean
+                return df['predicted_outbreaks_next_day'].mean() if not df['predicted_outbreaks_next_day'].empty else 1.0
+            return fallback_data['predicted_outbreaks_next_day'].mean()
+        
+        # Return average outbreaks for matching conditions
+        return matching_data['predicted_outbreaks_next_day'].mean()
+    except Exception as e:
+        st.error(f"Error in manual forecast: {e}")
+        return None
 
 def predict_image(model, image_to_predict):
     try:
@@ -83,17 +118,6 @@ def predict_image(model, image_to_predict):
     except Exception as e:
         st.error(f"Error during image prediction: {e}")
         return None, None
-
-def predict_outbreak(model, training_columns, input_data):
-    try:
-        new_df = pd.DataFrame([input_data])
-        new_df_encoded = pd.get_dummies(new_df, drop_first=True)
-        new_df_aligned = new_df_encoded.reindex(columns=training_columns, fill_value=0)
-        prediction = model.predict(new_df_aligned)
-        return prediction[0]
-    except Exception as e:
-        st.error(f"Error making forecast: {e}")
-        return None
 
 def get_coordinates(place):
     geolocator = Nominatim(user_agent="plant_disease_tracker")
@@ -215,18 +239,17 @@ with tab3:
     st.header("Outbreak Forecast")
     st.markdown("Predict the number of disease outbreaks for the next day based on climate and location data.")
 
-    forecasting_model, train_cols = train_forecasting_model('final_combined_dataset.csv')
+    df = load_dataset('final_combined_dataset.csv')
 
-    if forecasting_model is None or train_cols is None:
-        st.warning("The forecasting model could not be loaded. Please ensure 'final_combined_dataset.csv' is in the same directory.")
+    if df is None:
+        st.warning("The dataset could not be loaded. Please ensure 'final_combined_dataset.csv' is in the same directory.")
     else:
         try:
-            df = pd.read_csv('final_combined_dataset.csv')
             locations = sorted(df['location'].unique())
             soil_statuses = sorted(df['soil_status'].unique())
             weathers = sorted(df['weather'].unique())
-        except FileNotFoundError:
-            st.error("Dataset 'final_combined_dataset.csv' not found. Please upload the file.")
+        except Exception as e:
+            st.error(f"Error processing dataset: {e}")
             locations = ['Mumbai', 'Pune', 'Nashik', 'Satara', 'Sangli', 'Kolhapur', 'Amravati', 'Aurangabad', 'Solapur', 'Nagpur']
             soil_statuses = ['Dry', 'Moist', 'Wet', 'Cracked', 'Waterlogged']
             weathers = ['Sunny', 'Cloudy', 'Rainy', 'Foggy', 'Stormy']
@@ -255,7 +278,7 @@ with tab3:
                         'soil_status': soil_status,
                         'weather': weather
                     }
-                    predicted_outbreaks = predict_outbreak(forecasting_model, train_cols, input_data)
+                    predicted_outbreaks = manual_forecast_outbreak(df, input_data)
                     if predicted_outbreaks is not None:
                         st.success("Forecast Generated!")
                         st.metric(label="Predicted Outbreaks (Next Day)", value=f"{predicted_outbreaks:.2f}")
@@ -263,7 +286,7 @@ with tab3:
                             'lat': latitude,
                             'long': longitude,
                             'class': disease,
-                            'severity': predicted_outbreaks / 20.0
+                            'severity': predicted_outbreaks / 20.0  # Normalize for map
                         }]
                         st.subheader("Forecast Location")
                         folium_map = create_map(forecast_data, center=[latitude, longitude], zoom=10, heatmap=False)
