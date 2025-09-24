@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # --- 2. MODEL AND CLASS NAMES ---
-# This list must be in the exact same order as the classes your model was trained on.
+# This list must be in the exact same order as the classes the model was trained on.
 CLASS_NAMES = [
     'Apple___Apple_scab', 'Apple___Black_rot', 'Apple___Cedar_apple_rust', 'Apple___healthy',
     'Blueberry___healthy', 'Cherry_(including_sour)___Powdery_mildew', 'Cherry_(including_sour)___healthy',
@@ -29,24 +29,24 @@ CLASS_NAMES = [
     'Tomato___healthy'
 ]
 
-# --- 3. HELPER FUNCTIONS (with Caching) ---
+# --- 3. HELPER FUNCTIONS (with Caching for performance) ---
 
 @st.cache_resource
 def load_model(model_path):
     """
-    Loads the pre-trained Keras model from the specified file.
+    Loads the pre-trained Keras model from the specified H5 file.
     Uses caching to avoid reloading the model on every interaction.
     """
     if not os.path.exists(model_path):
         st.error(f"Model file not found at {model_path}")
-        st.error("Please ensure the 'best_model.keras' file is in the same directory as this script.")
+        st.error("Please ensure the 'plant_disease_model.h5' file is in the same directory as this script.")
         return None
     try:
-        # Load the model from the .keras format
         model = tf.keras.models.load_model(model_path)
         return model
     except Exception as e:
         st.error(f"Error loading the model: {e}")
+        st.error("This may be due to a corrupted file or a version mismatch. Please ensure the model file is valid.")
         return None
 
 def predict_image(model, image_to_predict):
@@ -55,13 +55,15 @@ def predict_image(model, image_to_predict):
     and returns the predicted class and confidence score.
     """
     try:
-        # This model expects images of size 256x256
-        img = image_to_predict.resize((256, 256))
+        # The model expects images of size 224x224
+        img = image_to_predict.resize((224, 224))
         
         # Convert the image to a NumPy array
         img_array = tf.keras.preprocessing.image.img_to_array(img)
         
-        # This model has a Rescaling layer, so no manual normalization is needed.
+        # Normalize the pixel values to be between 0 and 1
+        img_array = img_array / 255.0
+        
         # Create a batch of 1 for the model input
         img_array = tf.expand_dims(img_array, 0)
 
@@ -84,7 +86,7 @@ st.title("🌿 Plant Disease Diagnosis")
 st.markdown("Upload an image of a plant leaf, and the AI will identify the disease.")
 
 # Load the model
-model = load_model('best_model.keras')
+model = load_model('plant_disease_model.h5')
 
 # File uploader widget
 uploaded_file = st.file_uploader(
@@ -102,7 +104,7 @@ elif uploaded_file is not None:
     
     st.divider()
     
-    # Predict and display the result when the button is clicked
+    # Add a button to trigger the diagnosis
     if st.button("Diagnose Disease"):
         with st.spinner("🔍 Analyzing the image..."):
             predicted_class, confidence = predict_image(model, image)
