@@ -6,3 +6,4 @@ folium==0.20.0
 streamlit-folium==0.25.1
 geopy==2.4.1
 pandas==2.3.0
+RandomForestRegressor
