@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import os
 import folium
+from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import pandas as pd
@@ -93,7 +94,7 @@ def create_map(data):
     Creates a Folium map with markers and heatmap based on outbreak data.
     """
     try:
-        m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)  # Center on India
+        m = folium.Map(location=[20.5937, 78.9629], zoom_start=5, tiles="OpenStreetMap")  # Center on India
         heat_data = [[row['lat'], row['long'], row['severity']] for row in data if pd.notnull(row['lat']) and pd.notnull(row['long'])]
         if heat_data:
             HeatMap(heat_data, radius=15).add_to(m)
@@ -113,7 +114,7 @@ def create_map(data):
 # --- 4. STREAMLIT UI ---
 
 st.title("🌿 Plant Disease Diagnosis & Outbreak Visualization")
-st.markdown("Upload a plant leaf image for disease diagnosis or report a disease outbreak to visualize on a map.")
+st.markdown("Upload a plant leaf image for disease diagnosis or report a disease outbreak to visualize on a map of India.")
 
 # Initialize session state for outbreak data and predicted disease
 if 'outbreak_data' not in st.session_state:
@@ -138,7 +139,7 @@ with tab1:
         st.warning("The model could not be loaded. Please check the file path and integrity.")
     elif uploaded_file is not None:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image",width=300)
+        st.image(image, caption="Uploaded Image", use_column_width=True)
         st.divider()
         if st.button("Diagnose Disease"):
             with st.spinner("🔍 Analyzing the image..."):
@@ -160,7 +161,7 @@ with tab1:
 # --- Outbreak Visualization Tab ---
 with tab2:
     st.header("Outbreak Visualization")
-    st.markdown("Report a plant disease outbreak by specifying the location, disease, and severity.")
+    st.markdown("Report a plant disease outbreak to visualize on an interactive map of India. Markers are red for diseases and green for healthy plants.")
 
     # Set default disease to predicted disease if available, else first class
     default_disease = st.session_state.predicted_disease if st.session_state.predicted_disease in CLASS_NAMES else CLASS_NAMES[0]
