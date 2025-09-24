@@ -1,7 +1,4 @@
-
 import streamlit as st
-import tensorflow as tf
-from PIL import Image
 import numpy as np
 import os
 import folium
@@ -38,18 +35,6 @@ CLASS_NAMES = [
 # --- 3. HELPER FUNCTIONS ---
 
 @st.cache_resource
-def load_diagnosis_model(model_path):
-    if not os.path.exists(model_path):
-        st.error(f"Model file not found at {model_path}. Please ensure 'plant_disease_model.h5' is in the same directory.")
-        return None
-    try:
-        model = tf.keras.models.load_model(model_path)
-        return model
-    except Exception as e:
-        st.error(f"Error loading the diagnosis model: {e}")
-        return None
-
-@st.cache_resource
 def load_dataset(file_path):
     try:
         df = pd.read_csv(file_path)
@@ -62,16 +47,7 @@ def load_dataset(file_path):
         return None
 
 def manual_forecast_outbreak(df, input_data):
-    """
-    Manually forecasts outbreaks by averaging historical data for similar conditions.
-    Args:
-        df (pd.DataFrame): The dataset with historical outbreak data.
-        input_data (dict): Input data with class_name, location, latitude, longitude, temperature, humidity, soil_status, weather.
-    Returns:
-        float: Predicted number of outbreaks, or None if no data matches.
-    """
     try:
-        # Define matching conditions
         disease = input_data['class_name']
         location = input_data['location'].strip()
         temp = input_data['temperature']
@@ -79,7 +55,6 @@ def manual_forecast_outbreak(df, input_data):
         soil = input_data['soil_status']
         weather = input_data['weather']
 
-        # Filter dataset for similar conditions
         mask = (
             (df['class_name'] == disease) &
             (df['location'] == location) &
@@ -91,33 +66,15 @@ def manual_forecast_outbreak(df, input_data):
         matching_data = df[mask]
 
         if matching_data.empty:
-            # Fallback: Average outbreaks for the disease across all conditions
             fallback_data = df[df['class_name'] == disease]
             if fallback_data.empty:
-                # Ultimate fallback: Dataset mean
                 return df['predicted_outbreaks_next_day'].mean() if not df['predicted_outbreaks_next_day'].empty else 1.0
             return fallback_data['predicted_outbreaks_next_day'].mean()
         
-        # Return average outbreaks for matching conditions
         return matching_data['predicted_outbreaks_next_day'].mean()
     except Exception as e:
         st.error(f"Error in manual forecast: {e}")
         return None
-
-def predict_image(model, image_to_predict):
-    try:
-        img = image_to_predict.resize((224, 224))
-        img_array = tf.keras.preprocessing.image.img_to_array(img)
-        img_array = img_array / 255.0
-        img_array = tf.expand_dims(img_array, 0)
-        predictions = model.predict(img_array)
-        score = tf.nn.softmax(predictions[0])
-        predicted_class = CLASS_NAMES[np.argmax(score)]
-        confidence = 100 * np.max(score)
-        return predicted_class, confidence
-    except Exception as e:
-        st.error(f"Error during image prediction: {e}")
-        return None, None
 
 def get_coordinates(place):
     geolocator = Nominatim(user_agent="plant_disease_tracker")
@@ -171,34 +128,8 @@ tab1, tab2, tab3 = st.tabs(["Disease Diagnosis", "Outbreak Visualization", "Outb
 # --- Disease Diagnosis Tab ---
 with tab1:
     st.header("Disease Diagnosis")
-    model = load_diagnosis_model('plant_disease_model.h5')
-    uploaded_file = st.file_uploader(
-        "Choose a plant leaf image...",
-        type=["jpg", "jpeg", "png"],
-        help="Upload an image for disease diagnosis."
-    )
-
-    if model is None:
-        st.warning("The diagnosis model could not be loaded. Please check the file path and integrity.")
-    elif uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_column_width=True)
-        st.divider()
-        if st.button("Diagnose Disease"):
-            with st.spinner("🔍 Analyzing the image..."):
-                predicted_class, confidence = predict_image(model, image)
-            if predicted_class is not None:
-                st.success("Analysis Complete!")
-                st.session_state.predicted_disease = predicted_class
-                formatted_class = predicted_class.replace('___', ' ').replace('_', ' ')
-                if 'healthy' in formatted_class.lower():
-                    st.markdown(f"### Diagnosis: <span style='color:green;'>**{formatted_class}**</span>", unsafe_allow_html=True)
-                    st.balloons()
-                else:
-                    st.markdown(f"### Diagnosis: <span style='color:red;'>**{formatted_class}**</span>", unsafe_allow_html=True)
-                st.metric(label="Confidence", value=f"{confidence:.2f}%")
-    else:
-        st.info("Please upload an image to begin the diagnosis.")
+    st.warning("Disease Diagnosis is temporarily disabled due to dependency issues. Please use the other tabs.")
+    st.info("Upload a plant leaf image to diagnose diseases (requires TensorFlow, which is not currently installed).")
 
 # --- Outbreak Visualization Tab ---
 with tab2:
@@ -286,7 +217,7 @@ with tab3:
                             'lat': latitude,
                             'long': longitude,
                             'class': disease,
-                            'severity': predicted_outbreaks / 20.0  # Normalize for map
+                            'severity': predicted_outbreaks / 20.0
                         }]
                         st.subheader("Forecast Location")
                         folium_map = create_map(forecast_data, center=[latitude, longitude], zoom=10, heatmap=False)
