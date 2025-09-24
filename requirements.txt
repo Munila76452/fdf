@@ -1,4 +1,4 @@
-streamlit
+streamlit==1.38.0
 tensorflow==2.20.0
 pillow==11.3.0
 numpy==2.3.3
@@ -6,4 +6,4 @@ folium==0.20.0
 streamlit-folium==0.25.1
 geopy==2.4.1
 pandas==2.3.0
-RandomForestRegressor
+scikit-learn==1.5.2
