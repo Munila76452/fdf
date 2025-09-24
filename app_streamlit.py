@@ -9,10 +9,11 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import pandas as pd
 import time
+from sklearn.ensemble import RandomForestRegressor
 
 # --- 1. APP CONFIGURATION ---
 st.set_page_config(
-    page_title="Plant Disease Diagnosis & Outbreak Visualization",
+    page_title="Plant Disease Diagnosis & Outbreak Analysis",
     page_icon="🌿",
     layout="centered"
 )
@@ -37,9 +38,9 @@ CLASS_NAMES = [
 # --- 3. HELPER FUNCTIONS ---
 
 @st.cache_resource
-def load_model(model_path):
+def load_diagnosis_model(model_path):
     """
-    Loads the pre-trained Keras model from the specified H5 file.
+    Loads the pre-trained Keras model for disease diagnosis.
     """
     if not os.path.exists(model_path):
         st.error(f"Model file not found at {model_path}")
@@ -49,9 +50,31 @@ def load_model(model_path):
         model = tf.keras.models.load_model(model_path)
         return model
     except Exception as e:
-        st.error(f"Error loading the model: {e}")
+        st.error(f"Error loading the diagnosis model: {e}")
         st.error("This may be due to a corrupted file or a version mismatch. Please ensure the model file is valid.")
         return None
+
+@st.cache_resource
+def train_forecasting_model(file_path):
+    """
+    Loads the dataset, preprocesses it, and trains a RandomForestRegressor model.
+    """
+    try:
+        df = pd.read_csv(file_path)
+        df = df.drop('filename', axis=1)
+        categorical_features = ['class_name', 'location', 'soil_status', 'weather']
+        df_encoded = pd.get_dummies(df, columns=categorical_features, drop_first=True)
+        X = df_encoded.drop('predicted_outbreaks_next_day', axis=1)
+        y = df_encoded['predicted_outbreaks_next_day']
+        model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+        model.fit(X, y)
+        return model, X.columns
+    except FileNotFoundError:
+        st.error(f"Error: The file '{file_path}' was not found.")
+        return None, None
+    except Exception as e:
+        st.error(f"Error training forecasting model: {e}")
+        return None, None
 
 def predict_image(model, image_to_predict):
     """
@@ -72,6 +95,20 @@ def predict_image(model, image_to_predict):
         st.error(f"An error occurred during prediction: {e}")
         return None, None
 
+def predict_outbreak(model, training_columns, input_data):
+    """
+    Makes a prediction for a single new data point.
+    """
+    try:
+        new_df = pd.DataFrame([input_data])
+        new_df_encoded = pd.get_dummies(new_df, drop_first=True)
+        new_df_aligned = new_df_encoded.reindex(columns=training_columns, fill_value=0)
+        prediction = model.predict(new_df_aligned)
+        return prediction[0]
+    except Exception as e:
+        st.error(f"Error making forecast: {e}")
+        return None
+
 def get_coordinates(place):
     """
     Geocodes a place name to latitude and longitude using Nominatim.
@@ -79,7 +116,7 @@ def get_coordinates(place):
     geolocator = Nominatim(user_agent="plant_disease_tracker")
     try:
         location = geolocator.geocode(place + ", India")
-        time.sleep(1)  # Avoid rate limit
+        time.sleep(1)
         if location:
             return location.latitude, location.longitude
         else:
@@ -89,21 +126,23 @@ def get_coordinates(place):
         st.error(f"Error geocoding {place}: {e}")
         return None, None
 
-def create_map(data):
+def create_map(data, center=[20.5937, 78.9629], zoom=5, heatmap=True):
     """
-    Creates a Folium map with markers and heatmap based on outbreak data.
+    Creates a Folium map with markers and optional heatmap.
     """
     try:
-        m = folium.Map(location=[20.5937, 78.9629], zoom_start=5, tiles="OpenStreetMap")  # Center on India
-        heat_data = [[row['lat'], row['long'], row['severity']] for row in data if pd.notnull(row['lat']) and pd.notnull(row['long'])]
-        if heat_data:
-            HeatMap(heat_data, radius=15).add_to(m)
+        m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap")
+        if heatmap:
+            heat_data = [[row['lat'], row['long'], row['severity']] for row in data if pd.notnull(row['lat']) and pd.notnull(row['long'])]
+            if heat_data:
+                HeatMap(heat_data, radius=15).add_to(m)
         for row in data:
             if pd.notnull(row['lat']) and pd.notnull(row['long']):
                 color = 'green' if 'healthy' in row['class'].lower() else 'red'
+                popup_text = f"{row['class'].replace('___', ' ').replace('_', ' ')}: {row['severity']:.2f}"
                 folium.Marker(
                     [row['lat'], row['long']],
-                    popup=f"{row['class'].replace('___', ' ').replace('_', ' ')}: {row['severity']:.2f}",
+                    popup=popup_text,
                     icon=folium.Icon(color=color)
                 ).add_to(m)
         return m
@@ -113,22 +152,22 @@ def create_map(data):
 
 # --- 4. STREAMLIT UI ---
 
-st.title("🌿 Plant Disease Diagnosis & Outbreak Visualization")
-st.markdown("Upload a plant leaf image for disease diagnosis or report a disease outbreak to visualize on a map of India.")
+st.title("🌿 Plant Disease Diagnosis & Outbreak Analysis")
+st.markdown("Diagnose plant diseases, visualize outbreaks, or forecast disease spread based on climate conditions.")
 
-# Initialize session state for outbreak data and predicted disease
+# Initialize session state
 if 'outbreak_data' not in st.session_state:
     st.session_state.outbreak_data = []
 if 'predicted_disease' not in st.session_state:
     st.session_state.predicted_disease = None
 
-# Tabs for Diagnosis and Outbreak Visualization
-tab1, tab2 = st.tabs(["Disease Diagnosis", "Outbreak Visualization"])
+# Tabs
+tab1, tab2, tab3 = st.tabs(["Disease Diagnosis", "Outbreak Visualization", "Outbreak Forecast"])
 
 # --- Disease Diagnosis Tab ---
 with tab1:
     st.header("Disease Diagnosis")
-    model = load_model('plant_disease_model.h5')
+    model = load_diagnosis_model('plant_disease_model.h5')
     uploaded_file = st.file_uploader(
         "Choose a plant leaf image...",
         type=["jpg", "jpeg", "png"],
@@ -136,7 +175,7 @@ with tab1:
     )
 
     if model is None:
-        st.warning("The model could not be loaded. Please check the file path and integrity.")
+        st.warning("The diagnosis model could not be loaded. Please check the file path and integrity.")
     elif uploaded_file is not None:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Image", use_column_width=True)
@@ -146,7 +185,6 @@ with tab1:
                 predicted_class, confidence = predict_image(model, image)
             if predicted_class is not None:
                 st.success("Analysis Complete!")
-                # Store the predicted disease in session state
                 st.session_state.predicted_disease = predicted_class
                 formatted_class = predicted_class.replace('___', ' ').replace('_', ' ')
                 if 'healthy' in formatted_class.lower():
@@ -163,10 +201,7 @@ with tab2:
     st.header("Outbreak Visualization")
     st.markdown("Report a plant disease outbreak to visualize on an interactive map of India. Markers are red for diseases and green for healthy plants.")
 
-    # Set default disease to predicted disease if available, else first class
     default_disease = st.session_state.predicted_disease if st.session_state.predicted_disease in CLASS_NAMES else CLASS_NAMES[0]
-
-    # Input form
     with st.form(key="outbreak_form"):
         place = st.text_input("Location (e.g., Mumbai, Maharashtra)", value="Mumbai, Maharashtra")
         disease = st.selectbox("Disease", options=CLASS_NAMES, index=CLASS_NAMES.index(default_disease))
@@ -187,7 +222,6 @@ with tab2:
                 else:
                     st.error("Unable to add location to the map. Please try a different location.")
 
-    # Display the outbreak map
     if st.session_state.outbreak_data:
         st.subheader("Outbreak Map")
         folium_map = create_map(st.session_state.outbreak_data)
@@ -195,3 +229,69 @@ with tab2:
             st_folium(folium_map, width=700, height=500)
     else:
         st.info("No outbreak data available. Add data using the form above to visualize the map.")
+
+# --- Outbreak Forecast Tab ---
+with tab3:
+    st.header("Outbreak Forecast")
+    st.markdown("Predict the number of disease outbreaks for the next day based on climate and location data.")
+
+    # Load and train forecasting model
+    forecasting_model, train_cols = train_forecasting_model('final_combined_dataset.csv')
+
+    if forecasting_model is None or train_cols is None:
+        st.warning("The forecasting model could not be loaded. Please ensure 'final_combined_dataset.csv' is in the same directory.")
+    else:
+        # Get unique locations and other options from the dataset
+        try:
+            df = pd.read_csv('final_combined_dataset.csv')
+            locations = sorted(df['location'].unique())
+            soil_statuses = sorted(df['soil_status'].unique())
+            weathers = sorted(df['weather'].unique())
+        except FileNotFoundError:
+            st.error("Dataset 'final_combined_dataset.csv' not found. Please upload the file.")
+            locations = ['Mumbai', 'Pune', 'Nashik', 'Satara', 'Sangli', 'Kolhapur', 'Amravati', 'Aurangabad', 'Solapur', 'Nagpur']
+            soil_statuses = ['Dry', 'Moist', 'Wet', 'Cracked', 'Waterlogged']
+            weathers = ['Sunny', 'Cloudy', 'Rainy', 'Foggy', 'Stormy']
+
+        # Input form for forecasting
+        with st.form(key="forecast_form"):
+            default_disease = st.session_state.predicted_disease if st.session_state.predicted_disease in CLASS_NAMES else CLASS_NAMES[0]
+            disease = st.selectbox("Disease", options=CLASS_NAMES, index=CLASS_NAMES.index(default_disease), key="forecast_disease")
+            location = st.selectbox("Location", options=locations, index=locations.index('Kolhapur') if 'Kolhapur' in locations else 0)
+            latitude = st.number_input("Latitude", min_value=6.0, max_value=37.0, value=16.804442, step=0.000001, format="%.6f")
+            longitude = st.number_input("Longitude", min_value=68.0, max_value=98.0, value=74.225031, step=0.000001, format="%.6f")
+            temperature = st.number_input("Temperature (°C)", min_value=0.0, max_value=50.0, value=27.7, step=0.1)
+            humidity = st.number_input("Humidity (%)", min_value=0.0, max_value=100.0, value=71.5, step=0.1)
+            soil_status = st.selectbox("Soil Status", options=soil_statuses, index=soil_statuses.index('Moist') if 'Moist' in soil_statuses else 0)
+            weather = st.selectbox("Weather", options=weathers, index=weathers.index('Foggy') if 'Foggy' in weathers else 0)
+            submit_forecast = st.form_submit_button("Predict Outbreak")
+
+            if submit_forecast:
+                with st.spinner("Generating forecast..."):
+                    input_data = {
+                        'class_name': disease,
+                        'location': location.strip(),
+                        'latitude': latitude,
+                        'longitude': longitude,
+                        'temperature': temperature,
+                        'humidity': humidity,
+                        'soil_status': soil_status,
+                        'weather': weather
+                    }
+                    predicted_outbreaks = predict_outbreak(forecasting_model, train_cols, input_data)
+                    if predicted_outbreaks is not None:
+                        st.success("Forecast Generated!")
+                        st.metric(label="Predicted Outbreaks (Next Day)", value=f"{predicted_outbreaks:.2f}")
+                        # Display map with the forecasted location
+                        forecast_data = [{
+                            'lat': latitude,
+                            'long': longitude,
+                            'class': disease,
+                            'severity': predicted_outbreaks / 20.0  # Normalize for heatmap (assuming max outbreaks ~20)
+                        }]
+                        st.subheader("Forecast Location")
+                        folium_map = create_map(forecast_data, center=[latitude, longitude], zoom=10, heatmap=False)
+                        if folium_map:
+                            st_folium(folium_map, width=700, height=500)
+                    else:
+                        st.error("Failed to generate forecast. Please check your inputs.")
