@@ -1,3 +1,4 @@
+
 import streamlit as st
 import tensorflow as tf
 from PIL import Image
@@ -39,26 +40,18 @@ CLASS_NAMES = [
 
 @st.cache_resource
 def load_diagnosis_model(model_path):
-    """
-    Loads the pre-trained Keras model for disease diagnosis.
-    """
     if not os.path.exists(model_path):
-        st.error(f"Model file not found at {model_path}")
-        st.error("Please ensure the 'plant_disease_model.h5' file is in the same directory as this script.")
+        st.error(f"Model file not found at {model_path}. Please ensure 'plant_disease_model.h5' is in the same directory.")
         return None
     try:
         model = tf.keras.models.load_model(model_path)
         return model
     except Exception as e:
         st.error(f"Error loading the diagnosis model: {e}")
-        st.error("This may be due to a corrupted file or a version mismatch. Please ensure the model file is valid.")
         return None
 
 @st.cache_resource
 def train_forecasting_model(file_path):
-    """
-    Loads the dataset, preprocesses it, and trains a RandomForestRegressor model.
-    """
     try:
         df = pd.read_csv(file_path)
         df = df.drop('filename', axis=1)
@@ -70,17 +63,13 @@ def train_forecasting_model(file_path):
         model.fit(X, y)
         return model, X.columns
     except FileNotFoundError:
-        st.error(f"Error: The file '{file_path}' was not found.")
+        st.error(f"Error: The file '{file_path}' was not found. Please ensure 'final_combined_dataset.csv' is uploaded.")
         return None, None
     except Exception as e:
         st.error(f"Error training forecasting model: {e}")
         return None, None
 
 def predict_image(model, image_to_predict):
-    """
-    Takes a loaded Keras model and a PIL image, preprocesses the image,
-    and returns the predicted class and confidence score.
-    """
     try:
         img = image_to_predict.resize((224, 224))
         img_array = tf.keras.preprocessing.image.img_to_array(img)
@@ -92,13 +81,10 @@ def predict_image(model, image_to_predict):
         confidence = 100 * np.max(score)
         return predicted_class, confidence
     except Exception as e:
-        st.error(f"An error occurred during prediction: {e}")
+        st.error(f"Error during image prediction: {e}")
         return None, None
 
 def predict_outbreak(model, training_columns, input_data):
-    """
-    Makes a prediction for a single new data point.
-    """
     try:
         new_df = pd.DataFrame([input_data])
         new_df_encoded = pd.get_dummies(new_df, drop_first=True)
@@ -110,9 +96,6 @@ def predict_outbreak(model, training_columns, input_data):
         return None
 
 def get_coordinates(place):
-    """
-    Geocodes a place name to latitude and longitude using Nominatim.
-    """
     geolocator = Nominatim(user_agent="plant_disease_tracker")
     try:
         location = geolocator.geocode(place + ", India")
@@ -127,9 +110,6 @@ def get_coordinates(place):
         return None, None
 
 def create_map(data, center=[20.5937, 78.9629], zoom=5, heatmap=True):
-    """
-    Creates a Folium map with markers and optional heatmap.
-    """
     try:
         m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap")
         if heatmap:
@@ -235,13 +215,11 @@ with tab3:
     st.header("Outbreak Forecast")
     st.markdown("Predict the number of disease outbreaks for the next day based on climate and location data.")
 
-    # Load and train forecasting model
     forecasting_model, train_cols = train_forecasting_model('final_combined_dataset.csv')
 
     if forecasting_model is None or train_cols is None:
         st.warning("The forecasting model could not be loaded. Please ensure 'final_combined_dataset.csv' is in the same directory.")
     else:
-        # Get unique locations and other options from the dataset
         try:
             df = pd.read_csv('final_combined_dataset.csv')
             locations = sorted(df['location'].unique())
@@ -253,7 +231,6 @@ with tab3:
             soil_statuses = ['Dry', 'Moist', 'Wet', 'Cracked', 'Waterlogged']
             weathers = ['Sunny', 'Cloudy', 'Rainy', 'Foggy', 'Stormy']
 
-        # Input form for forecasting
         with st.form(key="forecast_form"):
             default_disease = st.session_state.predicted_disease if st.session_state.predicted_disease in CLASS_NAMES else CLASS_NAMES[0]
             disease = st.selectbox("Disease", options=CLASS_NAMES, index=CLASS_NAMES.index(default_disease), key="forecast_disease")
@@ -282,12 +259,11 @@ with tab3:
                     if predicted_outbreaks is not None:
                         st.success("Forecast Generated!")
                         st.metric(label="Predicted Outbreaks (Next Day)", value=f"{predicted_outbreaks:.2f}")
-                        # Display map with the forecasted location
                         forecast_data = [{
                             'lat': latitude,
                             'long': longitude,
                             'class': disease,
-                            'severity': predicted_outbreaks / 20.0  # Normalize for heatmap (assuming max outbreaks ~20)
+                            'severity': predicted_outbreaks / 20.0
                         }]
                         st.subheader("Forecast Location")
                         folium_map = create_map(forecast_data, center=[latitude, longitude], zoom=10, heatmap=False)
