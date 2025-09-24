@@ -115,9 +115,11 @@ def create_map(data):
 st.title("🌿 Plant Disease Diagnosis & Outbreak Visualization")
 st.markdown("Upload a plant leaf image for disease diagnosis or report a disease outbreak to visualize on a map.")
 
-# Initialize session state for outbreak data
+# Initialize session state for outbreak data and predicted disease
 if 'outbreak_data' not in st.session_state:
     st.session_state.outbreak_data = []
+if 'predicted_disease' not in st.session_state:
+    st.session_state.predicted_disease = None
 
 # Tabs for Diagnosis and Outbreak Visualization
 tab1, tab2 = st.tabs(["Disease Diagnosis", "Outbreak Visualization"])
@@ -143,6 +145,8 @@ with tab1:
                 predicted_class, confidence = predict_image(model, image)
             if predicted_class is not None:
                 st.success("Analysis Complete!")
+                # Store the predicted disease in session state
+                st.session_state.predicted_disease = predicted_class
                 formatted_class = predicted_class.replace('___', ' ').replace('_', ' ')
                 if 'healthy' in formatted_class.lower():
                     st.markdown(f"### Diagnosis: <span style='color:green;'>**{formatted_class}**</span>", unsafe_allow_html=True)
@@ -158,10 +162,13 @@ with tab2:
     st.header("Outbreak Visualization")
     st.markdown("Report a plant disease outbreak by specifying the location, disease, and severity.")
 
+    # Set default disease to predicted disease if available, else first class
+    default_disease = st.session_state.predicted_disease if st.session_state.predicted_disease in CLASS_NAMES else CLASS_NAMES[0]
+
     # Input form
     with st.form(key="outbreak_form"):
         place = st.text_input("Location (e.g., Mumbai, Maharashtra)", value="Mumbai, Maharashtra")
-        disease = st.selectbox("Disease", options=CLASS_NAMES)
+        disease = st.selectbox("Disease", options=CLASS_NAMES, index=CLASS_NAMES.index(default_disease))
         severity = st.slider("Severity", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
         submit_button = st.form_submit_button("Add to Outbreak Map")
 
@@ -175,7 +182,7 @@ with tab2:
                         'class': disease,
                         'severity': severity
                     })
-                    st.success(f"Added {disease} at {place} to the outbreak map.")
+                    st.success(f"Added {disease.replace('___', ' ').replace('_', ' ')} at {place} to the outbreak map.")
                 else:
                     st.error("Unable to add location to the map. Please try a different location.")
 
