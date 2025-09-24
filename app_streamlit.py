@@ -138,7 +138,7 @@ with tab1:
         st.warning("The model could not be loaded. Please check the file path and integrity.")
     elif uploaded_file is not None:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+        st.image(image, caption="Uploaded Image",width=300)
         st.divider()
         if st.button("Diagnose Disease"):
             with st.spinner("🔍 Analyzing the image..."):
